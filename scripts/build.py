@@ -18,7 +18,13 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "work/cache"
 UPDATE = "https://copilot.tencent.com/v2/update?platform="
-PACKAGING_REVISION = 2
+PACKAGING_REVISION = 3
+LAUNCHER = '#!/bin/sh\nexec /opt/WorkBuddy/launch-workbuddy "$@"\n'
+# Desktop-integration assets reused verbatim from the official Linux deb.
+OFFICIAL_ICONS = ["16x16", "24x24", "32x32", "48x48", "64x64", "96x96", "128x128", "256x256", "512x512"]
+OFFICIAL_OPT_FILES = ["tray-linux.png", "tray-linux@2x.png", "default_app.asar", "apparmor-profile"]
+# Dependencies required by the official package and missing from ours.
+OFFICIAL_DEPENDS = ["libnotify4", "libxss1", "libxtst6", "libatspi2.0-0", "libuuid1", "libsecret-1-0"]
 
 
 def run(*args, **kwargs):
@@ -214,6 +220,125 @@ def patch_linux(app):
     return ["Use upstream IM fallback on Linux (native enterprise IM SDK unavailable)"]
 
 
+def extract_debian_assets(work):
+    # The official donor deb already ships every desktop-integration asset;
+    # reuse them verbatim instead of regenerating lookalikes.
+    icons = {}
+    for dimension in OFFICIAL_ICONS:
+        source = work / f"linux/usr/share/icons/hicolor/{dimension}/apps/workbuddy.png"
+        if not source.is_file():
+            raise ValueError(f"Official deb is missing the {dimension} workbuddy icon; review the asset extraction")
+        icons[dimension] = source
+    changelog = work / "linux/usr/share/doc/workbuddy/changelog.gz"
+    desktop = work / "linux/usr/share/applications/workbuddy.desktop"
+    for path in (changelog, desktop):
+        if not path.is_file():
+            raise ValueError(f"Official deb layout changed; {path} is missing; review the asset extraction")
+    scripts = work / "linux-control"
+    for name in ("preinst", "postinst", "prerm", "postrm"):
+        if not (scripts / name).is_file():
+            raise ValueError(f"Official deb maintainer script {name} is missing; review the control extraction")
+    opt = {name: source for name in OFFICIAL_OPT_FILES
+           if (source := work / "linux/opt/WorkBuddy/resources" / name).is_file()}
+    return dict(icons=icons, changelog=changelog, desktop=desktop, opt=opt)
+
+
+def patch_postrm(text):
+    # The official postrm removes /usr/bin/workbuddy unconditionally. dpkg runs
+    # the old postrm with "upgrade" right after unpacking the new files, so
+    # that removal deletes the new package's launcher. Guard it like dpkg
+    # expects: package-owned files are only removed on remove/purge.
+    pattern = r"^rm -f '/usr/bin/workbuddy' '/usr/bin/@genieworkbuddy-desktop' \|\| true$"
+    guarded = ('case "$1" in\n'
+               "    remove|purge)\n"
+               "        rm -f '/usr/bin/workbuddy' '/usr/bin/@genieworkbuddy-desktop' || true\n"
+               "        ;;\n"
+               "esac")
+    text, count = re.subn(pattern, guarded, text, flags=re.MULTILINE)
+    if count != 1:
+        raise ValueError("Official postrm layout changed; review the removal guard patch")
+    return text
+
+
+def patch_postinst(text):
+    # Keep the official cache refresh, and restore the CLI launcher when an
+    # earlier upgrade (see patch_postrm) left the system without it.
+    if "gtk-update-icon-cache" not in text or "update-desktop-database" not in text:
+        raise ValueError("Official postinst layout changed; review the launcher self-heal patch")
+    heal = ("# Unofficial addition: an older official postrm deletes /usr/bin/workbuddy\n"
+            "# right after unpacking during upgrades; restore the launcher if missing.\n"
+            "if [ ! -e /usr/bin/workbuddy ]; then\n"
+            "    printf '#!/bin/sh\\nexec /opt/WorkBuddy/launch-workbuddy \"$@\"\\n' > /usr/bin/workbuddy\n"
+            "    chmod 755 /usr/bin/workbuddy\n"
+            "fi\n")
+    text, count = re.subn(r"\nexit 0\n?$", "\n" + heal + "\nexit 0\n", text)
+    if count != 1:
+        raise ValueError("Official postinst layout changed; review the launcher self-heal patch")
+    return text
+
+
+def patch_desktop(text):
+    # Adopt the official entry wholesale; only the launcher path differs.
+    text, count = re.subn(r"^Exec=/opt/WorkBuddy/workbuddy %U$", "Exec=/usr/bin/workbuddy %U", text, flags=re.MULTILINE)
+    if count != 1:
+        raise ValueError("Official desktop entry changed; review the Exec patch")
+    return text + "Comment[zh_CN]=腾讯云代码助手\n"
+
+
+def repository_owner():
+    # The Debian maintainer mirrors the GitHub repository owner, so it must
+    # not be hardcoded and must not impersonate Tencent.
+    try:
+        url = run("git", "-C", ROOT, "config", "--get", "remote.origin.url",
+                  capture_output=True, text=True).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        raise ValueError("git remote.origin.url is required to derive the maintainer name") from error
+    match = re.search(r"github\.com[/:]([^/]+)/", url)
+    if not match:
+        raise ValueError(f"Cannot derive the repository owner from: {url}")
+    return match[1]
+
+
+def control_text(arch, version, installed_size):
+    depends = ["libasound2t64 | libasound2", "libatk-bridge2.0-0", "libatk1.0-0", "libatspi2.0-0",
+               "libc6 (>= 2.31)", "libcairo2", "libcups2", "libdbus-1-3", "libdrm2", "libexpat1",
+               "libgbm1", "libglib2.0-0", "libgtk-3-0", "libnotify4", "libnspr4", "libnss3",
+               "libpango-1.0-0", "libsecret-1-0", "libx11-6", "libxcb1", "libxcomposite1",
+               "libxdamage1", "libxext6", "libxfixes3", "libxkbcommon0", "libxrandr2", "libxss1",
+               "libxtst6", "libuuid1", "libatomic1", "libstdc++6", "zlib1g", "xdg-utils"]
+    return f"""Package: workbuddy
+Version: {version}
+Architecture: {arch}
+Maintainer: {repository_owner()}
+Installed-Size: {installed_size}
+Depends: {", ".join(depends)}
+Recommends: libayatana-appindicator3-1 | libappindicator3-1, imagemagick
+Conflicts: workbuddy-port
+Replaces: workbuddy-port
+Section: default
+Priority: optional
+Homepage: https://www.workbuddy.cn
+Description: WorkBuddy Desktop - AI Agent Desktop Application
+ Unofficial macOS-to-Linux port of Tencent WorkBuddy.
+ Includes matching Tencent Linux Electron and native modules.
+ Uses the standard WorkBuddy command, installation and profile paths.
+"""
+
+
+def write_md5sums(package):
+    # Align with the official deb so `dpkg --verify` can audit the install.
+    lines = []
+    for path in sorted(package.rglob("*")):
+        if path.is_dir() or path.is_symlink() or package / "DEBIAN" in path.parents:
+            continue
+        checksum = hashlib.md5()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                checksum.update(chunk)
+        lines.append(f"{checksum.hexdigest()}  {path.relative_to(package).as_posix()}\n")
+    (package / "DEBIAN/md5sums").write_text("".join(lines))
+
+
 def build(args):
     arch = os.environ.get("ARCH", "amd64")
     if arch not in ("amd64", "arm64"):
@@ -246,6 +371,8 @@ def build(args):
     linux = metadata(f"workbuddy-linux-{machine}-deb")
     donor = download(linux["url"], linux["sha256hash"])
     run("dpkg-deb", "-x", donor, work / "linux")
+    run("dpkg-deb", "-e", donor, work / "linux-control")
+    debian = extract_debian_assets(work)
     linux_runtime = work / "linux/opt/WorkBuddy"
     runtime_version = (linux_runtime / "version").read_text().strip()
     validate_runtime_version(electron, runtime_version)
@@ -332,6 +459,14 @@ def build(args):
                     nativeModules=dict(sqlite=sqlite_version, koffi=koffi_version, pty=pty_version, sandbox=sandbox_version,
                                        harness=harness_version),
                     omittedSidecars=skipped, patches=patches,
+                    debianAssets=dict(icons=sorted(debian["icons"]), optFiles=sorted(debian["opt"]),
+                                      changelog=True, desktop=True, maintainerScripts="official, patched"),
+                    debianPatches=patches + [
+                        "postrm: guard /usr/bin removal by dpkg action (official deletes it unconditionally)",
+                        "postinst: restore the /usr/bin/workbuddy launcher when missing",
+                        "desktop: Exec points at the /usr/bin/workbuddy launcher",
+                        "control: Maintainer set to the repository owner; Vendor/License fields omitted",
+                    ],
                     sqliteArtifactSHA256=digest(sqlite_archive).hex() if sqlite_archive else None)
     (port / "port-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     run(executable, ROOT / "scripts/verify-native.cjs", app, env=env)
@@ -352,35 +487,36 @@ def build(args):
     if args.format in ("all", "deb"):
         package = work / "deb"
         copy(port, package / "opt/WorkBuddy")
+        # Desktop-integration helpers reused verbatim from the official deb.
+        for name, source in debian["opt"].items():
+            copy(source, package / "opt/WorkBuddy/resources" / name)
         launch = package / "usr/bin/workbuddy"
         launch.parent.mkdir(parents=True)
-        launch.write_text('#!/bin/sh\nexec /opt/WorkBuddy/launch-workbuddy "$@"\n')
+        launch.write_text(LAUNCHER)
         launch.chmod(0o755)
-        copy(ROOT / "WorkBuddy.desktop", package / "usr/share/applications/workbuddy.desktop")
-        copy(app / "resources/icon.png", package / "usr/share/icons/hicolor/1024x1024/apps/workbuddy.png")
-        control = package / "DEBIAN/control"
-        control.parent.mkdir()
+        (package / "usr/share/applications").mkdir(parents=True)
+        (package / "usr/share/applications/workbuddy.desktop").write_text(patch_desktop(debian["desktop"].read_text()))
+        for dimension, source in debian["icons"].items():
+            copy(source, package / f"usr/share/icons/hicolor/{dimension}/apps/workbuddy.png")
+        doc = package / "usr/share/doc/workbuddy"
+        copy(debian["changelog"], doc / "changelog.gz")
+        copy(ROOT / "LICENSE", doc / "packaging-LICENSE")
+        copy(port / "NOTICE-linux.txt", doc / "NOTICE")
+        control_dir = package / "DEBIAN"
+        control_dir.mkdir()
+        scripts = work / "linux-control"
+        (control_dir / "preinst").write_text((scripts / "preinst").read_text())
+        (control_dir / "prerm").write_text((scripts / "prerm").read_text())
+        (control_dir / "postinst").write_text(patch_postinst((scripts / "postinst").read_text()))
+        (control_dir / "postrm").write_text(patch_postrm((scripts / "postrm").read_text()))
+        for name in ("preinst", "postinst", "prerm", "postrm"):
+            (control_dir / name).chmod(0o755)
         size = run("du", "-sk", package, capture_output=True, text=True).stdout.split()[0]
-        control.write_text(f"""Package: workbuddy
-Version: {package_version}
-Architecture: {arch}
-Maintainer: acgq
-Installed-Size: {size}
-Depends: libasound2t64 | libasound2, libatk-bridge2.0-0, libatk1.0-0, libc6 (>= 2.31), libcairo2, libcups2, libdbus-1-3, libdrm2, libexpat1, libgbm1, libglib2.0-0, libgtk-3-0, libnspr4, libnss3, libpango-1.0-0, libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2, libatomic1, libstdc++6, zlib1g, xdg-utils
-Recommends: libayatana-appindicator3-1 | libappindicator3-1
-Conflicts: workbuddy-port
-Replaces: workbuddy-port
-Section: utils
-Priority: optional
-Homepage: https://www.workbuddy.cn/app
-Description: Unofficial macOS-to-Linux port of Tencent WorkBuddy
- Includes matching Tencent Linux Electron and native modules.
- Uses the standard WorkBuddy command, installation and profile paths.
-""")
+        (control_dir / "control").write_text(control_text(arch, package_version, size))
         (package / "opt/WorkBuddy/chrome-sandbox").chmod(0o4755)
-        copy(ROOT / "LICENSE", package / "usr/share/doc/workbuddy/packaging-LICENSE")
+        write_md5sums(package)
         output = dist / f"workbuddy_{package_version}_{arch}.deb"
-        run("dpkg-deb", "--root-owner-group", "--build", package, output)
+        run("dpkg-deb", "-Zxz", "--root-owner-group", "--build", package, output)
         outputs.append(output)
     for output in outputs:
         output.with_name(output.name + ".sha256").write_text(digest(output).hex() + "  " + output.name + "\n")

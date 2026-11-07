@@ -1,11 +1,14 @@
 import json
+import hashlib
 from pathlib import Path
 import plistlib
 import struct
 import tempfile
 import unittest
 
-from build import electron_version, extract_asar, patch_linux, pack_unpacked_asar, validate_runtime_version
+from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
+                   pack_unpacked_asar, patch_desktop, patch_linux, patch_postrm, patch_postinst,
+                   repository_owner, validate_runtime_version, write_md5sums)
 
 
 class BuildTests(unittest.TestCase):
@@ -107,6 +110,107 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(extract_asar(archive, output), [])
         self.assertEqual((output / "main/index.js").read_text(), "module.exports = 42")
         self.assertTrue((output / "tool").stat().st_mode & 0o111)
+
+    OFFICIAL_POSTRM = """#!/bin/bash
+
+if type update-alternatives >/dev/null 2>&1; then
+    update-alternatives --remove 'workbuddy' '/opt/WorkBuddy/workbuddy' || true
+    update-alternatives --remove '@genieworkbuddy-desktop' '/opt/WorkBuddy/@genieworkbuddy-desktop' || true
+fi
+
+rm -f '/usr/bin/workbuddy' '/usr/bin/@genieworkbuddy-desktop' || true
+"""
+
+    OFFICIAL_POSTINST = """#!/bin/bash
+
+set +e
+
+if type gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+
+if type update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+
+exit 0
+"""
+
+    OFFICIAL_DESKTOP = """[Desktop Entry]
+Name=WorkBuddy
+Exec=/opt/WorkBuddy/workbuddy %U
+Terminal=false
+Type=Application
+Icon=workbuddy
+StartupWMClass=workbuddy
+Comment=WorkBuddy Desktop - AI Agent Desktop Application
+MimeType=x-scheme-handler/workbuddy;
+Categories=Development;
+"""
+
+    def test_postrm_removal_is_guarded_by_dpkg_action(self):
+        patched = patch_postrm(self.OFFICIAL_POSTRM)
+        # The unconditional rm that deletes the new package's launcher during
+        # upgrades must only run for remove/purge now.
+        self.assertNotIn("\nrm -f '/usr/bin/workbuddy'", patched)
+        self.assertIn("remove|purge)", patched)
+        self.assertIn("rm -f '/usr/bin/workbuddy' '/usr/bin/@genieworkbuddy-desktop' || true", patched)
+        self.assertIn("update-alternatives --remove 'workbuddy'", patched)
+
+    def test_changed_postrm_stops_the_build(self):
+        with self.assertRaises(ValueError):
+            patch_postrm(self.OFFICIAL_POSTRM.replace("rm -f", "rm  -f"))
+
+    def test_postinst_keeps_cache_refresh_and_adds_launcher_self_heal(self):
+        patched = patch_postinst(self.OFFICIAL_POSTINST)
+        self.assertIn("gtk-update-icon-cache -f -t /usr/share/icons/hicolor", patched)
+        self.assertIn("update-desktop-database /usr/share/applications", patched)
+        self.assertIn("exec /opt/WorkBuddy/launch-workbuddy", patched)
+        self.assertLess(patched.index("if [ ! -e /usr/bin/workbuddy ]"), patched.rindex("exit 0"))
+
+    def test_changed_postinst_stops_the_build(self):
+        without_refresh = self.OFFICIAL_POSTINST.replace("update-desktop-database", "refresh-desktop-db")
+        with self.assertRaises(ValueError):
+            patch_postinst(without_refresh)
+        without_exit = self.OFFICIAL_POSTINST.replace("\nexit 0\n", "\n")
+        with self.assertRaises(ValueError):
+            patch_postinst(without_exit)
+
+    def test_desktop_adopts_official_entry_with_package_launcher(self):
+        patched = patch_desktop(self.OFFICIAL_DESKTOP)
+        self.assertIn("Exec=/usr/bin/workbuddy %U", patched)
+        self.assertNotIn("/opt/WorkBuddy/workbuddy", patched)
+        self.assertIn("Comment[zh_CN]=腾讯云代码助手", patched)
+        self.assertIn("Categories=Development;", patched)
+
+    def test_changed_desktop_stops_the_build(self):
+        with self.assertRaises(ValueError):
+            patch_desktop(self.OFFICIAL_DESKTOP.replace("Exec=/opt/WorkBuddy/workbuddy %U", "Exec=changed"))
+
+    def test_md5sums_covers_payload_and_skips_debian_and_links(self):
+        package = self.root / "pkg"
+        (package / "DEBIAN").mkdir(parents=True)
+        payload = package / "opt/WorkBuddy/data.bin"
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(b"payload")
+        link = package / "opt/WorkBuddy/link"
+        link.symlink_to("data.bin")
+        (package / "DEBIAN/control").write_text("Package: workbuddy\n")
+        write_md5sums(package)
+        lines = (package / "DEBIAN/md5sums").read_text().splitlines()
+        self.assertEqual(lines, [f"{hashlib.md5(b'payload').hexdigest()}  opt/WorkBuddy/data.bin"])
+
+    def test_control_aligns_with_the_official_package(self):
+        text = control_text("amd64", "5.9.3-3", 1000)
+        fields = dict(line.split(": ", 1) for line in text.splitlines() if ": " in line)
+        self.assertEqual(fields["Section"], "default")
+        self.assertEqual(fields["Homepage"], "https://www.workbuddy.cn")
+        self.assertEqual(fields["Maintainer"], repository_owner())
+        self.assertNotIn("Vendor", fields)
+        depends = fields["Depends"].split(", ")
+        self.assertTrue(set(OFFICIAL_DEPENDS) <= set(depends))
+        self.assertIn("imagemagick", fields["Recommends"].split(", "))
+        self.assertIn("WorkBuddy Desktop - AI Agent Desktop Application", text)
 
 
 if __name__ == "__main__":

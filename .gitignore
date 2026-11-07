@@ -1,4 +1,5 @@
 dist/
 work/
 __pycache__/
+.workbuddy/
 

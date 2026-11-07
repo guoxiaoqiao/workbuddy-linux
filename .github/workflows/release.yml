@@ -2,9 +2,9 @@ name: Build and release Linux port
 
 on:
   push:
-    paths: ['scripts/**', '.github/workflows/**', 'WorkBuddy.desktop', 'package*.json']
+    paths: ['scripts/**', '.github/workflows/**', 'LICENSE', 'README.md', 'package*.json']
   pull_request:
-    paths: ['scripts/**', '.github/workflows/**', 'WorkBuddy.desktop', 'package*.json']
+    paths: ['scripts/**', '.github/workflows/**', 'LICENSE', 'README.md', 'package*.json']
   workflow_dispatch:
     inputs:
       force:
@@ -32,7 +32,7 @@ jobs:
           node-version: 22
       - run: npm test
       - run: |
-          bash -n scripts/build-deb.sh scripts/build-linux.sh
+          bash -n scripts/build-deb.sh scripts/build-linux.sh scripts/verify-install.sh
           sh -n scripts/launch.sh
           node --check scripts/verify-native.cjs
           node --check scripts/smoke-test.mjs
