@@ -23,6 +23,12 @@
 - 官方 control 使用 `Section: default` 与 9 项依赖；我们因 Electron 37 需要更多依赖，是超集对齐，不要删减。
 - 上游 URL/ASAR 结构/压缩代码的严格匹配是**有意设计**；上游改版导致构建失败时，先复审对应提取/补丁函数，不要放松断言。
 
+## 有意偏离官方 deb 的清单（已获维护者确认）
+
+1. **不打包 `resources/runtime`**（node/python 共约 600MB）：理由是 Linux 自带解释器、省约 1/3 体积。替代链：系统 node/python3 → 应用 BinaryManager 按需下载（腾讯 COS 等源）。包内原生模块（node-pty/koffi）均为 N-API 预编译，实测 node 22/24 双版本兼容，无 ABI 绑定。
+2. **`bundledRuntime` 配置默认关闭**：以 fail-fast 补丁改 `main-bootstrap.js` 的 `DEFAULT_BUNDLED_RUNTIME_CONFIG` 字面量（`enabled:!0`→`!1`）；用户可在设置→安全中心手动开启。
+3. **control 增加 `nodejs` 依赖**（官方内置 runtime 故无此依赖；python3 系统必装不声明）。
+
 ## 合规红线
 
 - Maintainer **不写死**：构建时从 `git config remote.origin.url` 提取 GitHub 仓库所有者作为 Maintainer（`repository_owner()`）——**谁 fork 就是谁**：fork 者克隆自己的仓库构建时，remote 指向其 fork，Maintainer 自动变为 fork 者的用户名，无需任何配置；**不得**设置 Vendor 字段或冒充腾讯为维护者。脱离 git 仓库（无 remote）构建会 fail-fast。

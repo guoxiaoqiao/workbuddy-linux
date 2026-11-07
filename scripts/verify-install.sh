@@ -31,6 +31,12 @@ for path in /usr/share/doc/workbuddy/changelog.gz /usr/share/doc/workbuddy/NOTIC
 done
 echo '齐备'
 
+echo '== 内置运行时不打包（有意偏离官方布局） =='
+[ ! -e /opt/WorkBuddy/resources/runtime ] || fail 'resources/runtime 不应存在（该运行时已改为系统解释器/按需下载）'
+grep -q 'DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:!1,' /opt/WorkBuddy/resources/app.asar.unpacked/main/main-bootstrap.js \
+  || fail 'bundledRuntime 默认值未改为关闭'
+echo '符合预期'
+
 echo '== postinst 启动器自愈 =='
 backup=$(mktemp)
 cp /usr/bin/workbuddy "$backup"

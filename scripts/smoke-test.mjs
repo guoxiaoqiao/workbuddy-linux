@@ -71,6 +71,11 @@ try {
   app = spawn(path.join(portDir, 'launch-workbuddy'), ['--remote-debugging-port=0', '--ozone-platform=x11'], {
     env, stdio: ['ignore', log, log], detached: true,
   });
+  // Upstream may resolve the log dir from Electron's default userData before
+  // WORKBUDDY_USER_DATA_DIR is applied, so main.log can land in either place.
+  const mainLogCandidates = [path.join(profile, 'logs/main.log'),
+                             path.join(profile, 'xdg-config/WorkBuddy/logs/main.log')];
+  const mainLogPath = () => mainLogCandidates.find(candidate => existsSync(candidate)) ?? mainLogCandidates[0];
   let page;
   for (let attempt = 0; attempt < 120; attempt++) {
     if (app.exitCode !== null) throw new Error(`Application exited: ${app.exitCode}`);
@@ -100,20 +105,30 @@ try {
   for (let attempt = 0; attempt < 60; attempt++) {
     const result = await command('Runtime.evaluate', { expression: 'document.body.innerText', returnByValue: true });
     text = result.result.value || '';
-    if (/登录|Login|Log in|Sign in|开始使用|What can I help|Ideas into reality/i.test(text)) break;
+    if (/登录|Login|Log in|Sign in|开始使用|What can I help|Ideas into reality|今天帮你做些什么/i.test(text)) break;
     await delay(500);
   }
-  const startupLog = readFileSync(path.join(profile, 'logs/main.log'), 'utf8');
+  // Upstream 5.8 wrote JSON lines; 5.9 switched to electron-log text with a
+  // pretty-printed fields object, so accept both shapes.
+  const credentialBootstrapFields = logText => {
+    const block = /\[CredentialBootstrap\] main bootstrap created \{([\s\S]*?)\n\}/.exec(logText);
+    if (block) {
+      return Object.fromEntries([...block[1].matchAll(/^\s*(\w+): ([^,\n]+)/gm)]
+        .map(([, key, value]) => [key, value === 'true' ? true : value === 'false' ? false : value]));
+    }
+    const events = logText.trim().split('\n').map(line => { try { return JSON.parse(line); } catch { return {}; } });
+    return events.find(event => event.message?.[0] === '[CredentialBootstrap] main bootstrap created')?.message?.[1];
+  };
+  const startupLog = readFileSync(mainLogPath(), 'utf8');
   assert.ok(!startupLog.includes('[StorageBootstrap]'), 'Credential storage initialization failed');
-  const events = startupLog.trim().split('\n').map(line => { try { return JSON.parse(line); } catch { return {}; } });
-  const credentials = events.find(event => event.message?.[0] === '[CredentialBootstrap] main bootstrap created')?.message?.[1];
+  const credentials = credentialBootstrapFields(startupLog);
   assert.equal(credentials?.symmetricAvailable, true, 'Tencent storage symmetric key is unavailable');
   assert.equal(credentials?.asymmetricMaterialAvailable, true, 'Protected per-user storage key is unavailable');
-  assert.match(text, /登录|Login|Log in|Sign in|开始使用|What can I help|Ideas into reality/i, 'Application main content did not render');
+  assert.match(text, /登录|Login|Log in|Sign in|开始使用|What can I help|Ideas into reality|今天帮你做些什么/i, 'Application main content did not render');
   // A fallback window alone is insufficient: the daemon must finish startup.
   for (let attempt = 0; attempt < 60; attempt++) {
-    const mainLog = path.join(profile, 'logs/main.log');
-    if (existsSync(mainLog) && readFileSync(mainLog, 'utf8').includes('Main bootstrap ready')) break;
+    const mainLog = mainLogCandidates.find(existsSync);
+    if (mainLog && readFileSync(mainLog, 'utf8').includes('Main bootstrap ready')) break;
     if (attempt === 59) throw new Error('Daemon bootstrap did not complete');
     await delay(500);
   }

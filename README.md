@@ -13,7 +13,7 @@
 1. **取源**：从 `copilot.tencent.com` 更新接口拉取 macOS zip 与 Linux deb 元数据（URL/版本/sha256 严格校验，二进制按哈希缓存）。
 2. **拆包**：自研 ASAR 解包器还原 macOS 应用代码，缺失的其他平台原生文件只记录跳过。
 3. **换运行时**：按 macOS `Info.plist` 的 Electron 版本，从官方 Linux deb 嫁接严格匹配的腾讯定制运行时（保留 `workbuddyStorage` API 与 loading fuses）。
-4. **打补丁**：让企业 IM SDK 走上游 headless/unavailable 回退（该 SDK 仅含 Mach-O/Windows 原生件）。
+4. **打补丁**：让企业 IM SDK 走上游 headless/unavailable 回退（该 SDK 仅含 Mach-O/Windows 原生件）；「内置运行时」默认改为关闭（包内不含 node/python 运行时，见下）。
 5. **补依赖**：按 Electron ABI 安装 better-sqlite3 / koffi / node-pty / agent-harness / sandbox-cli，全部校验完整性。
 6. **打包**：便携 `tar.gz` + `.deb`，每个产物附 `.sha256`，`port-manifest.json` 记录全链路溯源。
 
@@ -23,6 +23,7 @@ deb 打包逻辑**尽量对齐官方 Linux deb**，原则是「资产提取优�
 
 - **直接提取**：hicolor 全部 9 个尺寸图标、四个维护脚本（preinst/prerm/postinst/postrm）、`changelog.gz`、desktop 模板、官方包 `resources/` 下的桌面集成资源（tray 图标、`default_app.asar`、`apparmor-profile`）。
 - **补丁差异**：官方 postrm 会无条件删除 `/usr/bin/workbuddy`（升级时误删新包文件），已加 `$1` 守卫；postinst 增加启动器自愈；control 对齐官方字段（Section/Homepage/Description/依赖）。Maintainer 从构建者克隆的 `remote.origin.url` 自动提取（fork 后打包即为 fork 者），不冒充腾讯。
+- **有意偏离**：不打包官方内置的 `resources/runtime`（node/python，约 600MB）——包内原生模块均为 N-API 预编译，实测 node 22/24 皆兼容；control 相应增加 `nodejs` 依赖（python3 系统必装，不重复声明）；「内置运行时」设置默认关闭、可手动开启（开启后应用按需下载或用系统解释器）。
 - **质量件**：生成 `md5sums`（支持 `dpkg --verify`）、xz 压缩对齐官方。
 
 ## 质量保障
@@ -36,10 +37,18 @@ deb 打包逻辑**尽量对齐官方 Linux deb**，原则是「资产提取优�
 产物命名 `workbuddy_<上游版本>_base<官方deb版本>_unofficial_repack<N>_<架构>.deb`，标明这是基于官方底座 deb 重打包的非官方版本：
 
 ```bash
-sudo apt install ./workbuddy_5.9.3.42398134-d4692421_base5.6.2.40046327-c7b525f3_unofficial_repack4_amd64.deb
+sudo apt install ./workbuddy_5.9.3.42398134-d4692421_base5.6.2.40046327-c7b525f3_unofficial_repack6_amd64.deb
 ```
 
 安装路径 `/opt/WorkBuddy`，命令行入口 `workbuddy`，配置目录 `~/.workbuddy`。从官方 5.6.2 升级安装即可直接替换。
+
+## 运行时说明
+
+包内**不含** node/python 运行时（相比官方包小约 1/3）：
+
+- UI 与基础功能使用 Electron 自带 Node，无外部依赖。
+- Agent/CLI 功能使用系统 `nodejs`（deb 依赖自动安装，N-API 原生模块对 node 22/24 均兼容）与系统 `python3`（Ubuntu 必装）。
+- 设置 → 安全中心的「内置运行时」默认关闭；开启后应用会按需下载官方运行时（腾讯 COS 源）作为补充。
 
 ## 已知限制
 

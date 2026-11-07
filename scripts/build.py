@@ -18,7 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "work/cache"
 UPDATE = "https://copilot.tencent.com/v2/update?platform="
-PACKAGING_REVISION = 4
+PACKAGING_REVISION = 6
 LAUNCHER = '#!/bin/sh\nexec /opt/WorkBuddy/launch-workbuddy "$@"\n'
 # Desktop-integration assets reused verbatim from the official Linux deb.
 OFFICIAL_ICONS = ["16x16", "24x24", "32x32", "48x48", "64x64", "96x96", "128x128", "256x256", "512x512"]
@@ -232,6 +232,20 @@ def patch_linux(app):
     return ["Use upstream IM fallback on Linux (native enterprise IM SDK unavailable)"]
 
 
+def patch_bundled_runtime_default(app):
+    # The packaged deb ships no resources/runtime, so "bundled runtime" must
+    # default to off; users can re-enable it in Security Center, which makes
+    # the agents download interpreters or fall back to the system ones.
+    target = app / "main/main-bootstrap.js"
+    code = target.read_text()
+    literal = "DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:!0,"
+    replacement = "DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:!1,"
+    if code.count(literal) != 1:
+        raise ValueError("Upstream bundled runtime default changed; review the Linux patch")
+    target.write_text(code.replace(literal, replacement, 1))
+    return "Bundled runtime defaults to disabled (no runtime packaged)"
+
+
 def extract_debian_assets(work):
     # The official donor deb already ships every desktop-integration asset;
     # reuse them verbatim instead of regenerating lookalikes.
@@ -317,7 +331,10 @@ def control_text(arch, version, installed_size):
                "libgbm1", "libglib2.0-0", "libgtk-3-0", "libnotify4", "libnspr4", "libnss3",
                "libpango-1.0-0", "libsecret-1-0", "libx11-6", "libxcb1", "libxcomposite1",
                "libxdamage1", "libxext6", "libxfixes3", "libxkbcommon0", "libxrandr2", "libxss1",
-               "libxtst6", "libuuid1", "libatomic1", "libstdc++6", "zlib1g", "xdg-utils"]
+               "libxtst6", "libuuid1", "libatomic1", "libstdc++6", "zlib1g", "xdg-utils",
+               # No resources/runtime is packaged; the agents resolve a system node
+               # (N-API native modules work on any recent node) or download one.
+               "nodejs"]
     return f"""Package: workbuddy
 Version: {version}
 Architecture: {arch}
@@ -397,12 +414,14 @@ def build(args):
     app = resources / "app.asar.unpacked"
     skipped = extract_asar(contents / "Resources/app.asar", app)
     patches = patch_linux(app)
+    patches.append(patch_bundled_runtime_default(app))
     for name in ["wb-guest-sdk", "conversation-report.html", "startup-report.html"]:
         copy(contents / "Resources" / name, resources / name)
 
     # UI, main-process code, CLI and prompts all come from the macOS source.
+    # resources/runtime (node/python) is deliberately NOT packaged: it costs
+    # ~600 MB and the agents resolve system interpreters or download on demand.
     native = linux_runtime / "resources"
-    copy(native / "runtime", resources / "runtime")
     runtime_source = app / "main/shell-env-async.js"
     main_code = (runtime_source if runtime_source.exists() else app / "main/index.js").read_text()
     runtime_versions = {}
@@ -413,7 +432,9 @@ def build(args):
         expected = re.search(pattern, main_code)
         if not expected:
             raise ValueError(f"Source runtime declaration changed: {name}")
-        output = run(resources / "runtime" / name / "bin" / command, "--version", capture_output=True, text=True).stdout.strip()
+        # Cross-check against the donor tree (never packaged) so the declared
+        # versions stay verified without shipping the runtimes.
+        output = run(native / "runtime" / name / "bin" / command, "--version", capture_output=True, text=True).stdout.strip()
         if output.removeprefix("v").removeprefix("Python ") != expected[1]:
             raise ValueError(f"Linux donor runtime {output} does not match macOS {name} {expected[1]}")
         runtime_versions[name] = expected[1]
@@ -468,6 +489,8 @@ def build(args):
         "Sources and platform helper provenance: port-manifest.json.\n")
     manifest = dict(version=version, packagingRevision=PACKAGING_REVISION, source=mac, linuxHelpers=linux,
                     electron=electron, tencentElectron=runtime_version, electronABI=abi, runtimes=runtime_versions,
+                    runtimePackaged=False, bundledRuntimeDefault="disabled",
+                    systemRuntimeDeps=["nodejs"],
                     nativeModules=dict(sqlite=sqlite_version, koffi=koffi_version, pty=pty_version, sandbox=sandbox_version,
                                        harness=harness_version),
                     omittedSidecars=skipped, patches=patches,
@@ -478,13 +501,18 @@ def build(args):
                         "postinst: restore the /usr/bin/workbuddy launcher when missing",
                         "desktop: Exec points at the /usr/bin/workbuddy launcher",
                         "control: Maintainer set to the repository owner; Vendor/License fields omitted",
+                        "layout: resources/runtime not packaged; agents use system interpreters or download on demand",
+                        "control: nodejs added to Depends (official bundles the runtime and needs none); "
+                        "python3 is preinstalled on Ubuntu and not declared",
                     ],
                     sqliteArtifactSHA256=digest(sqlite_archive).hex() if sqlite_archive else None)
     (port / "port-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     run(executable, ROOT / "scripts/verify-native.cjs", app, env=env)
-    run(resources / "runtime/node/bin/node", ROOT / "scripts/verify-native.cjs", app, "--cli")
+    # Build-time-only interpreter from the donor tree (never packaged).
+    cli_node = native / "runtime/node/bin/node"
+    run(cli_node, ROOT / "scripts/verify-native.cjs", app, "--cli")
     if harness_version:
-        run(resources / "runtime/node/bin/node", modules / "@genie/agent-harness/bin/agent-harness.js", "--version")
+        run(cli_node, modules / "@genie/agent-harness/bin/agent-harness.js", "--version")
     run(app / f"cli/vendor/ripgrep/{machine}-linux/rg", "--version")
     run(sandbox_target / "sandbox-cli", "--version")
 

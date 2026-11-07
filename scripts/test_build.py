@@ -8,7 +8,8 @@ import unittest
 
 from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
                    output_stem,
-                   pack_unpacked_asar, patch_desktop, patch_linux, patch_postrm, patch_postinst,
+                   pack_unpacked_asar, patch_bundled_runtime_default, patch_desktop, patch_linux,
+                   patch_postrm, patch_postinst,
                    repository_owner, validate_runtime_version, write_md5sums)
 
 
@@ -188,6 +189,23 @@ Categories=Development;
         with self.assertRaises(ValueError):
             patch_desktop(self.OFFICIAL_DESKTOP.replace("Exec=/opt/WorkBuddy/workbuddy %U", "Exec=changed"))
 
+    def test_bundled_runtime_defaults_to_disabled(self):
+        target = self.root / "app/main/main-bootstrap.js"
+        target.parent.mkdir(parents=True)
+        target.write_text("const X=1;DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:!0,"
+                          "tools:{node:!0,python:!0,gitBash:!0,brokeredShell:!0}};")
+        note = patch_bundled_runtime_default(self.root / "app")
+        self.assertIn("DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:!1,", target.read_text())
+        self.assertNotIn("DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:!0,", target.read_text())
+        self.assertEqual(note, "Bundled runtime defaults to disabled (no runtime packaged)")
+
+    def test_changed_bundled_runtime_default_stops_the_build(self):
+        target = self.root / "app/main/main-bootstrap.js"
+        target.parent.mkdir(parents=True)
+        target.write_text("DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:true};")
+        with self.assertRaises(ValueError):
+            patch_bundled_runtime_default(self.root / "app")
+
     def test_md5sums_covers_payload_and_skips_debian_and_links(self):
         package = self.root / "pkg"
         (package / "DEBIAN").mkdir(parents=True)
@@ -206,12 +224,12 @@ Categories=Development;
         self.assertEqual(
             stem,
             "workbuddy_5.9.3.42398134-d4692421"
-            "_base5.6.2.40046327-c7b525f3_unofficial_repack4_amd64")
+            "_base5.6.2.40046327-c7b525f3_unofficial_repack6_amd64")
         # Keep the donor official deb version visible and avoid the redundant
         # "deb" token the official filenames carry next to the extension.
         self.assertIn("_base5.6.2.40046327-c7b525f3_", stem)
         self.assertIn("_unofficial_", stem)
-        self.assertIn("_repack4_", stem)
+        self.assertIn("_repack6_", stem)
         self.assertNotIn("deb", stem)
 
     def test_control_aligns_with_the_official_package(self):
@@ -223,6 +241,7 @@ Categories=Development;
         self.assertNotIn("Vendor", fields)
         depends = fields["Depends"].split(", ")
         self.assertTrue(set(OFFICIAL_DEPENDS) <= set(depends))
+        self.assertIn("nodejs", depends)
         self.assertIn("imagemagick", fields["Recommends"].split(", "))
         self.assertIn("WorkBuddy Desktop - AI Agent Desktop Application", text)
 
