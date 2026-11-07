@@ -36,6 +36,7 @@
 - **产物命名由 `output_stem()` 统一生成**：`workbuddy_<上游版本>_base<官方deb版本>_unofficial_repack<N>_<架构>.deb`。`base<官方deb版本>` 取捐献者官方 Linux deb 的完整 packageVersion（可溯源到底座），`unofficial` 标识非官方，`repack<N>` 即 `PACKAGING_REVISION`（重打包修订号，放末尾让同内容各次 repack 相邻排序）。文件名里**不放** `deb` 字样（扩展名已表达）和 Electron 版本。改命名逻辑须同步 `test_build.py` 的命名测试。
 - 改动以下任何文件必须同步运行 `npm test` 并保持全绿：`scripts/build.py`、`scripts/test_build.py`、`scripts/*.sh`、`scripts/*.mjs`、`scripts/*.cjs`。
 - 新增/删除打包相关文件时，检查 `.github/workflows/release.yml` 的 `on.push.paths` / `on.pull_request.paths` 白名单是否覆盖（历史教训：`LICENSE`/`README.md` 曾被漏掉）。
+- **验证必须走真实流程**：打包脚本/构建逻辑有任何改动，必须实际执行一次完整构建（`./scripts/build-deb.sh`）并对产物做检查（`dpkg-deb -I` 控制字段、图标/脚本/`md5sums` 清单、`.sha256` 校验）后方可交付。**严禁**用重命名、手工修改历史产物的方式代替真实验证——历史产物是旧逻辑的输出，不代表新逻辑正确。
 - 新增纯函数优先做成可单测的形态（参照 `control_text`、`write_md5sums`），测试放入 `scripts/test_build.py`。
 - Arch 打包已移除（原 `build-arch.py`/`PKGBUILD.in`）；如需恢复，须从便携包重建并对齐同样的四步法。
 
