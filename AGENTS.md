@@ -33,6 +33,7 @@
 - **开发、测试与验证环境为 Ubuntu 26.04**；其他发行版与版本未作考虑、未作验证。涉及依赖名（如 `libasound2t64`）、dpkg/debhelper 行为的改动需在 Ubuntu 26.04 上实测；不要为其他环境引入未经验证的兼容分支。
 
 - 打包行为有任何用户可见变化 → bump `PACKAGING_REVISION`（`build.py` 顶部）。
+- **产物命名由 `output_stem()` 统一生成**：`workbuddy_<上游版本>_base<官方deb版本>_unofficial_repack<N>_<架构>.deb`。`base<官方deb版本>` 取捐献者官方 Linux deb 的完整 packageVersion（可溯源到底座），`unofficial` 标识非官方，`repack<N>` 即 `PACKAGING_REVISION`（重打包修订号，放末尾让同内容各次 repack 相邻排序）。文件名里**不放** `deb` 字样（扩展名已表达）和 Electron 版本。改命名逻辑须同步 `test_build.py` 的命名测试。
 - 改动以下任何文件必须同步运行 `npm test` 并保持全绿：`scripts/build.py`、`scripts/test_build.py`、`scripts/*.sh`、`scripts/*.mjs`、`scripts/*.cjs`。
 - 新增/删除打包相关文件时，检查 `.github/workflows/release.yml` 的 `on.push.paths` / `on.pull_request.paths` 白名单是否覆盖（历史教训：`LICENSE`/`README.md` 曾被漏掉）。
 - 新增纯函数优先做成可单测的形态（参照 `control_text`、`write_md5sums`），测试放入 `scripts/test_build.py`。
@@ -41,7 +42,7 @@
 ## 常用命令
 
 ```bash
-npm test                     # 19 项单元测试（ASAR 安全、补丁守卫、打包字段等）
+npm test                     # 20 项单元测试（ASAR 安全、补丁守卫、打包字段、产物命名等）
 ./scripts/build-deb.sh       # 仅构建 deb（需网络，产物在 dist/）
 ./scripts/build-linux.sh     # 便携包 + deb
 node scripts/smoke-test.mjs work/current-amd64/WorkBuddy   # Xvfb 下真实启动冒烟

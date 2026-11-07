@@ -33,8 +33,10 @@ deb 打包逻辑**尽量对齐官方 Linux deb**，原则是「资产提取优�
 
 ## 安装
 
+产物命名 `workbuddy_<上游版本>_base<官方deb版本>_unofficial_repack<N>_<架构>.deb`，标明这是基于官方底座 deb 重打包的非官方版本：
+
 ```bash
-sudo apt install ./workbuddy_<版本>_amd64.deb
+sudo apt install ./workbuddy_5.9.3.42398134-d4692421_base5.6.2.40046327-c7b525f3_unofficial_repack4_amd64.deb
 ```
 
 安装路径 `/opt/WorkBuddy`，命令行入口 `workbuddy`，配置目录 `~/.workbuddy`。从官方 5.6.2 升级安装即可直接替换。

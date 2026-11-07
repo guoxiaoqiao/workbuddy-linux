@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
+                   output_stem,
                    pack_unpacked_asar, patch_desktop, patch_linux, patch_postrm, patch_postinst,
                    repository_owner, validate_runtime_version, write_md5sums)
 
@@ -199,6 +200,19 @@ Categories=Development;
         write_md5sums(package)
         lines = (package / "DEBIAN/md5sums").read_text().splitlines()
         self.assertEqual(lines, [f"{hashlib.md5(b'payload').hexdigest()}  opt/WorkBuddy/data.bin"])
+
+    def test_output_stem_marks_unofficial_repack_with_the_deb_base(self):
+        stem = output_stem("5.9.3.42398134-d4692421", "5.6.2.40046327-c7b525f3", "amd64")
+        self.assertEqual(
+            stem,
+            "workbuddy_5.9.3.42398134-d4692421"
+            "_base5.6.2.40046327-c7b525f3_unofficial_repack4_amd64")
+        # Keep the donor official deb version visible and avoid the redundant
+        # "deb" token the official filenames carry next to the extension.
+        self.assertIn("_base5.6.2.40046327-c7b525f3_", stem)
+        self.assertIn("_unofficial_", stem)
+        self.assertIn("_repack4_", stem)
+        self.assertNotIn("deb", stem)
 
     def test_control_aligns_with_the_official_package(self):
         text = control_text("amd64", "5.9.3-3", 1000)

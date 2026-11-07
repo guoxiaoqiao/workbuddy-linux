@@ -18,7 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "work/cache"
 UPDATE = "https://copilot.tencent.com/v2/update?platform="
-PACKAGING_REVISION = 3
+PACKAGING_REVISION = 4
 LAUNCHER = '#!/bin/sh\nexec /opt/WorkBuddy/launch-workbuddy "$@"\n'
 # Desktop-integration assets reused verbatim from the official Linux deb.
 OFFICIAL_ICONS = ["16x16", "24x24", "32x32", "48x48", "64x64", "96x96", "128x128", "256x256", "512x512"]
@@ -71,6 +71,18 @@ def electron_version(contents):
     if len(versions) != 1 or not re.fullmatch(r"\d+\.\d+\.\d+", next(iter(versions))):
         raise ValueError(f"Cannot determine Electron version from source framework: {versions}")
     return versions.pop()
+
+
+def output_stem(version, base_version, arch):
+    """File stem that keeps the artifact visibly unofficial and traceable.
+
+    Shape: workbuddy_<upstream>_base<official-deb-version>_unofficial_repack<N>_<arch>.
+    `base_version` is the donor official Linux deb package version, so every
+    artifact records which official release it was repacked from; the repack
+    revision sits at the end so successive repacks sort together.
+    """
+    return (f"workbuddy_{version}_base{base_version}"
+            f"_unofficial_repack{PACKAGING_REVISION}_{arch}")
 
 
 def safe_path(root, relative):
@@ -480,8 +492,9 @@ def build(args):
     dist.mkdir(exist_ok=True)
     outputs = []
     package_version = f"{version}-{PACKAGING_REVISION}"
+    stem = output_stem(version, linux["packageVersion"], arch)
     if args.format in ("all", "portable"):
-        output = dist / f"workbuddy_{package_version}_{arch}.tar.gz"
+        output = dist / f"{stem}.tar.gz"
         run("tar", "-czf", output, "-C", work, "WorkBuddy")
         outputs.append(output)
     if args.format in ("all", "deb"):
@@ -515,7 +528,7 @@ def build(args):
         (control_dir / "control").write_text(control_text(arch, package_version, size))
         (package / "opt/WorkBuddy/chrome-sandbox").chmod(0o4755)
         write_md5sums(package)
-        output = dist / f"workbuddy_{package_version}_{arch}.deb"
+        output = dist / f"{stem}.deb"
         run("dpkg-deb", "-Zxz", "--root-owner-group", "--build", package, output)
         outputs.append(output)
     for output in outputs:
