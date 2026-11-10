@@ -44,11 +44,18 @@ sudo apt install ./workbuddy_5.9.3.42398134-d4692421_base5.6.2.40046327-c7b525f3
 
 ## 运行时说明
 
-包内**不含** node/python 运行时（相比官方包小约 1/3）：
+包内**不含** node/python 运行时（相比官方包小约 1/3）。应用按以下顺序解析运行时，任何一级可用即停止：
 
-- UI 与基础功能使用 Electron 自带 Node，无外部依赖。
-- Agent/CLI 功能使用系统 `nodejs`（deb 依赖自动安装，N-API 原生模块对 node 22/24 均兼容）与系统 `python3`（Ubuntu 必装）。
-- 设置 → 安全中心的「内置运行时」默认关闭；开启后应用会按需下载官方运行时（腾讯 COS 源）作为补充。
+1. **已注册版本**：`~/.workbuddy/binaries/` 中已注册的运行时；注册条目会先校验可执行性，失效即跳过。
+2. **系统解释器**：系统 `nodejs`（deb 依赖自动安装，N-API 原生模块对 node 22/24 均兼容）与系统 `python3`（Ubuntu 必装）。
+3. **按需下载**：仅当组件需要特定版本且上述均不满足时，应用才下载官方运行时（腾讯 COS 源）到 `~/.workbuddy/binaries/`——下载是有条件行为，并非必然发生。
+4. **Electron 兜底**：daemon 等组件最终可回退到 Electron 自带的 Node 运行，应用的基础功能不依赖任何外部解释器即可启动。
+
+补充说明：
+
+- UI 与 daemon 使用 Electron 自带 Node，无需系统安装 node 也能运行；系统 `nodejs` 主要服务于 Agent/CLI 场景。
+- 设置 → 安全中心的「内置运行时」默认关闭；该开关只影响部分组件（如附加 PATH 注入、Playwright 托管 node），核心解析链不读它。
+- 从官方 5.6.2 deb 升级的用户，`~/.workbuddy/binaries/` 下可能残留指向已移除的 `/opt/WorkBuddy/resources/runtime` 的注册符号链接：应用会自动跳过失效条目，无需处理；介意者可删除这些链接并清空 `~/.workbuddy/binaries/.cache/registry.json` 中的 `binaries` 条目。
 
 ## 已知限制
 
