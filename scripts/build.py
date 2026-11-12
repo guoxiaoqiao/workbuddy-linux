@@ -73,16 +73,32 @@ def electron_version(contents):
     return versions.pop()
 
 
-def output_stem(version, base_version, arch):
+def source_commit():
+    """Six-character commit of the packaging tree that produced an artifact.
+
+    The repository is mandatory for the Maintainer field, so a missing commit
+    means the build is unreproducible and must stop.
+    """
+    result = run("git", "rev-parse", "--short=6", "HEAD", cwd=ROOT, capture_output=True, text=True)
+    commit = result.stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{6}", commit):
+        raise ValueError(f"Unexpected git commit for artifact naming: {commit!r}")
+    dirty = run("git", "status", "--porcelain", "--untracked-files=no", cwd=ROOT,
+                capture_output=True, text=True).stdout.strip()
+    return commit, bool(dirty)
+
+
+def output_stem(version, base_version, arch, commit):
     """File stem that keeps the artifact visibly unofficial and traceable.
 
-    Shape: workbuddy_<upstream>_base<official-deb-version>_unofficial_repack<N>_<arch>.
+    Shape: workbuddy_<upstream>_base<official-deb-version>_unofficial_repack<N>_<commit>_<arch>.
     `base_version` is the donor official Linux deb package version, so every
     artifact records which official release it was repacked from; the repack
-    revision sits at the end so successive repacks sort together.
+    revision sits next to it and the packaging commit follows, so an artifact
+    can be traced back to the exact scripts that built it.
     """
     return (f"workbuddy_{version}_base{base_version}"
-            f"_unofficial_repack{PACKAGING_REVISION}_{arch}")
+            f"_unofficial_repack{PACKAGING_REVISION}_{commit}_{arch}")
 
 
 def safe_path(root, relative):
@@ -457,7 +473,10 @@ def build(args):
     skipped = extract_asar(contents / "Resources/app.asar", app, extraction)
     patches = patch_linux(app)
     patches.append(patch_bundled_runtime_default(app))
-    for name in ["wb-guest-sdk", "conversation-report.html", "startup-report.html"]:
+    # Third-party notices travel with the app: licenses/ carries the OpenUI
+    # attribution that the Debian helpers (LICENSE, LICENSES.chromium.html)
+    # do not cover.
+    for name in ["wb-guest-sdk", "conversation-report.html", "startup-report.html", "licenses"]:
         copy(contents / "Resources" / name, resources / name)
 
     # UI, main-process code, CLI and prompts all come from the macOS source.
@@ -529,7 +548,8 @@ def build(args):
         "Electron: see LICENSE and LICENSES.chromium.html in this directory.\n"
         "Other third-party notices are retained alongside their packages and runtimes.\n"
         "Sources and platform helper provenance: port-manifest.json.\n")
-    manifest = dict(version=version, packagingRevision=PACKAGING_REVISION, source=mac, linuxHelpers=linux,
+    manifest = dict(version=version, packagingRevision=PACKAGING_REVISION, packagingCommit=commit,
+                    source=mac, linuxHelpers=linux,
                     electron=electron, tencentElectron=runtime_version, electronABI=abi, runtimes=runtime_versions,
                     runtimePackaged=False, bundledRuntimeDefault="disabled",
                     systemRuntimeDeps=["nodejs"],
@@ -564,7 +584,11 @@ def build(args):
     dist.mkdir(exist_ok=True)
     outputs = []
     package_version = f"{version}-{PACKAGING_REVISION}"
-    stem = output_stem(version, linux["packageVersion"], arch)
+    commit, dirty = source_commit()
+    if dirty:
+        print("Warning: packaging tree has uncommitted changes; the commit in "
+              "the artifact name does not fully describe it", flush=True)
+    stem = output_stem(version, linux["packageVersion"], arch, commit)
     if args.format in ("all", "portable"):
         output = dist / f"{stem}.tar.gz"
         run("tar", "-czf", output, "-C", work, "WorkBuddy")
