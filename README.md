@@ -4,7 +4,7 @@
 
 > **Fork 说明**：本项目 fork 自 [acgq/workbuddy-linux](https://github.com/acgq/workbuddy-linux)，在其基础上持续维护与改进；原项目思路与大部分构建代码出自原作者 acgq，感谢其开创性工作。
 
-非官方的 macOS → Linux 移植打包工程。腾讯官方 Linux 版长期停留在 5.6.2 且空闲 CPU 占用偏高，本项目将 **macOS 版 WorkBuddy 的应用代码**嫁接到**官方 Linux deb 的定制 Electron 运行时与原生模块**之上，产出可日常使用的 Linux 包。
+非官方的 macOS → Linux 移植打包工程。腾讯官方 Linux 版长期停留在 5.6.2 不再更新，大量新特性无法使用，本项目将 **macOS 版 WorkBuddy 的应用代码**嫁接到**官方 Linux deb 的定制 Electron 运行时与原生模块**之上，产出可日常使用的 Linux 包。
 
 构建产物由 GitHub Actions 自动生成并附带校验，可在 [Releases](https://github.com/guoxiaoqiao/workbuddy-linux/releases) 下载。
 
