@@ -1,5 +1,7 @@
 # WorkBuddy for Linux
 
+> **⚠️ 免责声明**：本仓库**完全由 AI 开发**，所有构建脚本、补丁与文档均未经充分的人工审查与验证，可能存在未被发现的缺陷、安全隐患或行为偏差。请在充分了解风险的前提下谨慎使用；生产环境使用前请自行完成代码审计与验证。发现问题时欢迎提交 Issue。
+
 > **Fork 说明**：本项目 fork 自 [acgq/workbuddy-linux](https://github.com/acgq/workbuddy-linux)，在其基础上持续维护与改进；原项目思路与大部分构建代码出自原作者 acgq，感谢其开创性工作。
 
 非官方的 macOS → Linux 移植打包工程。腾讯官方 Linux 版长期停留在 5.6.2 且空闲 CPU 占用偏高，本项目将 **macOS 版 WorkBuddy 的应用代码**嫁接到**官方 Linux deb 的定制 Electron 运行时与原生模块**之上，产出可日常使用的 Linux 包。
