@@ -129,9 +129,11 @@ def extract_asar(archive, destination):
                     source = safe_path(sidecar, relative)
                     if source.is_file():
                         shutil.copy2(source, target)
-                    elif re.search(r"(?:^|/)(?:darwin[-_]|win32[-_]|freebsd[-_]|openbsd[-_]|musl[-_]|linux[-_])", relative):
-                        # The macOS ZIP omits other platforms' sidecars.
-                        # Required Linux bindings are restored and loaded below.
+                    elif re.search(r"(?:^|/)(?:darwin[-_]|win32[-_]|freebsd[-_]|openbsd[-_]|musl[-_]|linux[-_])", relative) or "/_CodeSignature/" in relative:
+                        # The macOS ZIP omits other platforms' sidecars, and
+                        # 5.11 re-signed frameworks without some _CodeSignature
+                        # members the ASAR index still lists. Both are
+                        # irrelevant to the Linux port, so skip and record.
                         skipped.append(relative)
                     else:
                         raise FileNotFoundError(f"Required ASAR sidecar is missing: {relative}")
