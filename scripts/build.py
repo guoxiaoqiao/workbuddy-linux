@@ -309,6 +309,24 @@ def patch_bundled_runtime_default(app):
     return "Bundled runtime defaults to disabled (no runtime packaged)"
 
 
+def patch_cli_invoke_log_noise(app):
+    # CLI hosts invoke WB-SDK channels through the main-process bridge, and
+    # every failed attempt is logged at error level. A CLI session without a
+    # registered handler for getProductConfiguration emits well over a
+    # thousand error lines per day and buries real failures in main.log. The
+    # error object still reaches the caller, so downgrade missing-handler
+    # noise to warnings and keep genuine invoke failures at error level.
+    target = app / "main/rpc-connection.js"
+    code = target.read_text()
+    literal = 'return r.l.error(`[WB-SDK] invoke error on "${t}": ${n?.message??e}`)'
+    replacement = ('return(/No handler for/.test(n?.message??e)'
+                   '?r.l.warn:r.l.error)(`[WB-SDK] invoke error on "${t}": ${n?.message??e}`)')
+    if code.count(literal) != 1:
+        raise ValueError("Upstream WB-SDK invoke error log changed; review the noise patch")
+    target.write_text(code.replace(literal, replacement, 1))
+    return "Missing-handler invoke errors log as warnings, not errors"
+
+
 def extract_debian_assets(work):
     # The official donor deb already ships every desktop-integration asset;
     # reuse them verbatim instead of regenerating lookalikes.
@@ -479,6 +497,7 @@ def build(args):
     skipped = extract_asar(contents / "Resources/app.asar", app, extraction)
     patches = patch_linux(app)
     patches.append(patch_bundled_runtime_default(app))
+    patches.append(patch_cli_invoke_log_noise(app))
     # Third-party notices travel with the app: licenses/ carries the OpenUI
     # attribution that the Debian helpers (LICENSE, LICENSES.chromium.html)
     # do not cover.

@@ -8,7 +8,8 @@ import unittest
 
 from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
                    output_stem,
-                   pack_unpacked_asar, patch_bundled_runtime_default, patch_desktop, patch_linux,
+                   pack_unpacked_asar, patch_bundled_runtime_default, patch_cli_invoke_log_noise,
+                   patch_desktop, patch_linux,
                    patch_postrm, patch_postinst,
                    repository_owner, validate_runtime_version, write_md5sums)
 
@@ -216,6 +217,24 @@ Categories=Development;
         target.write_text("DEFAULT_BUNDLED_RUNTIME_CONFIG={enabled:true};")
         with self.assertRaises(ValueError):
             patch_bundled_runtime_default(self.root / "app")
+
+    def test_missing_handler_invoke_errors_downgrade_to_warnings(self):
+        target = self.root / "app/main/rpc-connection.js"
+        target.parent.mkdir(parents=True)
+        literal = 'return r.l.error(`[WB-SDK] invoke error on "${t}": ${n?.message??e}`)'
+        target.write_text("X;" + literal + ",{code:1};")
+        note = patch_cli_invoke_log_noise(self.root / "app")
+        code = target.read_text()
+        self.assertIn("?r.l.warn:r.l.error)(`[WB-SDK] invoke error on", code)
+        self.assertIn("/No handler for/.test(n?.message??e)", code)
+        self.assertEqual(note, "Missing-handler invoke errors log as warnings, not errors")
+
+    def test_changed_invoke_error_log_stops_the_build(self):
+        target = self.root / "app/main/rpc-connection.js"
+        target.parent.mkdir(parents=True)
+        target.write_text('return r.l.error(`[WB-SDK] invoke failed: ${e}`);')
+        with self.assertRaises(ValueError):
+            patch_cli_invoke_log_noise(self.root / "app")
 
     def test_md5sums_covers_payload_and_skips_debian_and_links(self):
         package = self.root / "pkg"
