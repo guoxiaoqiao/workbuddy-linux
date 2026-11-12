@@ -22,6 +22,7 @@
 - **官方 postrm 的缺陷**：不判断 `$1`，无条件 `rm -f /usr/bin/workbuddy`。dpkg 升级时旧包 postrm 以 `upgrade` 参数在解包新文件之后执行，会删掉新包的启动器。因此我们的 postrm 补丁必须保留 `$1` 守卫，postinst 补丁必须保留启动器自愈块。
 - 官方 control 使用 `Section: default` 与 9 项依赖；我们因 Electron 37 需要更多依赖，是超集对齐，不要删减。
 - 上游 URL/ASAR 结构/压缩代码的严格匹配是**有意设计**；上游改版导致构建失败时，先复审对应提取/补丁函数，不要放松断言。
+- **ASAR sidecar 可能包含未登记在索引里的文件**：5.11 起 `app.asar.unpacked/main/preload/{fork-preload.cjs,background-worker.cjs}`、`@genie/im-channels*` 包与 `resources/im-backend-cmd/im-napi.node` 都不在 ASAR 索引中，但运行期按磁盘路径直接读取。只按索引提取会导致 daemon 的扩展服务 fork 失败（日志 `Extension fork preload not found: edge-sync`、`EXTENSION_PRELOAD_MISSING`），进而使 edge-sync / remote-desktop 起不来，「手机控制」等端云能力失效。`extract_asar()` 因此在索引遍历后调用 `mirror_sidecar()` 镜像整个 sidecar，并把数量记入 manifest 的 `sidecarOnlyFiles`；删改这段逻辑前请先跑一次真机冒烟并检查 daemon 日志。
 
 ## 有意偏离官方 deb 的清单（已获维护者确认）
 
@@ -49,7 +50,7 @@
 ## 常用命令
 
 ```bash
-npm test                     # 20 项单元测试（ASAR 安全、补丁守卫、打包字段、产物命名等）
+npm test                     # 23 项单元测试（ASAR 安全、sidecar 镜像、补丁守卫、打包字段、产物命名等）
 ./scripts/build-deb.sh       # 仅构建 deb（需网络，产物在 dist/）
 ./scripts/build-linux.sh     # 便携包 + deb
 node scripts/smoke-test.mjs work/current-amd64/WorkBuddy   # Xvfb 下真实启动冒烟

@@ -18,7 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "work/cache"
 UPDATE = "https://copilot.tencent.com/v2/update?platform="
-PACKAGING_REVISION = 6
+PACKAGING_REVISION = 7
 LAUNCHER = '#!/bin/sh\nexec /opt/WorkBuddy/launch-workbuddy "$@"\n'
 # Desktop-integration assets reused verbatim from the official Linux deb.
 OFFICIAL_ICONS = ["16x16", "24x24", "32x32", "48x48", "64x64", "96x96", "128x128", "256x256", "512x512"]
@@ -95,7 +95,42 @@ def safe_path(root, relative):
     return result
 
 
-def extract_asar(archive, destination):
+def mirror_sidecar(sidecar, destination):
+    """Copy sidecar files the ASAR index does not list.
+
+    Upstream ships some runtime pieces only on disk: 5.11's daemon extension
+    preloads (main/preload/fork-preload.cjs, background-worker.cjs) and the
+    @genie/im-channels packages are absent from the ASAR index but required at
+    run time. Index-driven extraction would silently drop them, so the whole
+    sidecar is mirrored and only files already extracted are left untouched.
+    """
+    copied = []
+    for root, directories, filenames in os.walk(sidecar, followlinks=False):
+        relative_root = os.path.relpath(root, sidecar)
+        for name in list(directories):
+            source = os.path.join(root, name)
+            if not os.path.islink(source):
+                continue
+            target = destination / relative_root / name
+            if not os.path.lexists(target):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.symlink_to(os.readlink(source))
+            directories.remove(name)
+        for name in filenames:
+            source = os.path.join(root, name)
+            target = destination / os.path.relpath(source, sidecar)
+            if os.path.lexists(target):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if os.path.islink(source):
+                target.symlink_to(os.readlink(source))
+            else:
+                shutil.copy2(source, target)
+            copied.append(str(os.path.relpath(source, sidecar)))
+    return copied
+
+
+def extract_asar(archive, destination, report=None):
     """Extract packed and sidecar files; never create fake native binaries."""
     destination.mkdir(parents=True)
     sidecar = archive.with_name(archive.name + ".unpacked")
@@ -146,6 +181,10 @@ def extract_asar(archive, destination):
                 if target.exists() and entry.get("executable"):
                     target.chmod(0o755)
         walk(tree["files"])
+    if sidecar.is_dir() and report is not None:
+        report["sidecarOnlyFiles"] = mirror_sidecar(sidecar, destination)
+    elif sidecar.is_dir():
+        mirror_sidecar(sidecar, destination)
     return skipped
 
 
@@ -414,7 +453,8 @@ def build(args):
             copy(entry, port / entry.name)
     resources = port / "resources"
     app = resources / "app.asar.unpacked"
-    skipped = extract_asar(contents / "Resources/app.asar", app)
+    extraction = {}
+    skipped = extract_asar(contents / "Resources/app.asar", app, extraction)
     patches = patch_linux(app)
     patches.append(patch_bundled_runtime_default(app))
     for name in ["wb-guest-sdk", "conversation-report.html", "startup-report.html"]:
@@ -495,7 +535,9 @@ def build(args):
                     systemRuntimeDeps=["nodejs"],
                     nativeModules=dict(sqlite=sqlite_version, koffi=koffi_version, pty=pty_version, sandbox=sandbox_version,
                                        harness=harness_version),
-                    omittedSidecars=skipped, patches=patches,
+                    omittedSidecars=skipped,
+                    sidecarOnlyFiles=len(extraction.get("sidecarOnlyFiles", [])),
+                    patches=patches,
                     debianAssets=dict(icons=sorted(debian["icons"]), optFiles=sorted(debian["opt"]),
                                       changelog=True, desktop=True, maintainerScripts="official, patched"),
                     debianPatches=patches + [

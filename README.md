@@ -30,9 +30,11 @@ deb 打包逻辑**尽量对齐官方 Linux deb**，原则是「资产提取优�
 
 ## 质量保障
 
-- `npm test`：ASAR 解包安全、补丁守卫、运行时版本匹配、打包字段与维护脚本补丁等单元测试。
+- `npm test`：ASAR 解包安全、sidecar 镜像、补丁守卫、运行时版本匹配、打包字段与维护脚本补丁等单元测试。
 - `verify-native.cjs`：在 Electron 与 CLI Node 两种环境实测 SQLite/FFI/PTY。
 - `smoke-test.mjs`：Xvfb 下真实启动，经 CDP 确认登录页渲染、凭证存储初始化、daemon ready，并采样空闲 CPU。
+
+> 打包会完整镜像 `app.asar.unpacked`：上游从 5.11 起把 daemon 的扩展 preload（`main/preload/*.cjs`）与 `@genie/im-channels*` 等文件只放在磁盘上、不登记进 ASAR 索引；只按索引提取会让 edge-sync / remote-desktop 等扩展服务启动失败（`EXTENSION_PRELOAD_MISSING`），进而影响「手机控制」等端云能力。
 
 ## 安装
 

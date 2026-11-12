@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
+from build import (OFFICIAL_DEPENDS, PACKAGING_REVISION, control_text, electron_version, extract_asar,
                    output_stem,
                    pack_unpacked_asar, patch_bundled_runtime_default, patch_desktop, patch_linux,
                    patch_postrm, patch_postinst,
@@ -50,6 +50,17 @@ class BuildTests(unittest.TestCase):
         self.assertEqual((output / "main.js").read_bytes(), b"hello")
         self.assertEqual((output / "native.node").read_bytes(), b"ELF")
         self.assertTrue((output / "main.js").stat().st_mode & 0o111)
+
+    def test_sidecar_files_missing_from_index_are_mirrored(self):
+        archive = self.archive({"main.js": {"offset": "0", "size": 5}} , b"hello")
+        sidecar = self.root / "app.asar.unpacked"
+        (sidecar / "main/preload").mkdir(parents=True)
+        (sidecar / "main/preload/fork-preload.cjs").write_bytes(b"preload")
+        output = self.root / "out"
+        report = {}
+        self.assertEqual(extract_asar(archive, output, report), [])
+        self.assertEqual((output / "main/preload/fork-preload.cjs").read_bytes(), b"preload")
+        self.assertEqual(report["sidecarOnlyFiles"], ["main/preload/fork-preload.cjs"])
 
     def test_absent_foreign_sidecar_is_reported_without_placeholder(self):
         archive = self.archive({"win32-x64": {"files": {"addon.node": {"unpacked": True, "size": 3}}}})
@@ -224,12 +235,12 @@ Categories=Development;
         self.assertEqual(
             stem,
             "workbuddy_5.9.3.42398134-d4692421"
-            "_base5.6.2.40046327-c7b525f3_unofficial_repack6_amd64")
+            f"_base5.6.2.40046327-c7b525f3_unofficial_repack{PACKAGING_REVISION}_amd64")
         # Keep the donor official deb version visible and avoid the redundant
         # "deb" token the official filenames carry next to the extension.
         self.assertIn("_base5.6.2.40046327-c7b525f3_", stem)
         self.assertIn("_unofficial_", stem)
-        self.assertIn("_repack6_", stem)
+        self.assertIn(f"_repack{PACKAGING_REVISION}_", stem)
         self.assertNotIn("deb", stem)
 
     def test_control_aligns_with_the_official_package(self):
