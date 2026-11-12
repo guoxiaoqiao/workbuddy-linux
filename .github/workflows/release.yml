@@ -56,8 +56,8 @@ jobs:
           set -euo pipefail
           python3 scripts/build.py --metadata > metadata.json
           version=$(jq -er '.packageVersion' metadata.json)
-          revision=$(jq -er '.packagingRevision' metadata.json)
-          tag="port-v${version}-r${revision}"
+          stamp=$(jq -er '.packagingStamp' metadata.json)
+          tag="port-v${version}-${stamp}"
           should_build=true
           if gh release view "$tag" >/dev/null 2>&1 && [[ "$FORCE" != true ]]; then
             should_build=false

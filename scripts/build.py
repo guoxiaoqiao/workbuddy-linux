@@ -18,7 +18,6 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "work/cache"
 UPDATE = "https://copilot.tencent.com/v2/update?platform="
-PACKAGING_REVISION = 7
 LAUNCHER = '#!/bin/sh\nexec /opt/WorkBuddy/launch-workbuddy "$@"\n'
 # Desktop-integration assets reused verbatim from the official Linux deb.
 OFFICIAL_ICONS = ["16x16", "24x24", "32x32", "48x48", "64x64", "96x96", "128x128", "256x256", "512x512"]
@@ -73,32 +72,39 @@ def electron_version(contents):
     return versions.pop()
 
 
-def source_commit():
-    """Six-character commit of the packaging tree that produced an artifact.
+def source_identity():
+    """Commit hash, commit timestamp and dirty flag of the packaging tree.
 
     The repository is mandatory for the Maintainer field, so a missing commit
-    means the build is unreproducible and must stop.
+    means the build is unreproducible and must stop. The timestamp is the
+    commit time rather than the build time, so rebuilding one commit always
+    produces the same version string.
     """
     result = run("git", "rev-parse", "--short=6", "HEAD", cwd=ROOT, capture_output=True, text=True)
     commit = result.stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{6}", commit):
         raise ValueError(f"Unexpected git commit for artifact naming: {commit!r}")
+    stamp = run("git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d.%H%M", cwd=ROOT,
+                capture_output=True, text=True).stdout.strip()
+    if not re.fullmatch(r"\d{8}\.\d{4}", stamp):
+        raise ValueError(f"Unexpected git commit date for artifact naming: {stamp!r}")
     dirty = run("git", "status", "--porcelain", "--untracked-files=no", cwd=ROOT,
                 capture_output=True, text=True).stdout.strip()
-    return commit, bool(dirty)
+    return commit, stamp, bool(dirty)
 
 
-def output_stem(version, base_version, arch, commit):
+def output_stem(version, base_version, arch, stamp, commit):
     """File stem that keeps the artifact visibly unofficial and traceable.
 
-    Shape: workbuddy_<upstream>_base<official-deb-version>_unofficial_repack<N>_<commit>_<arch>.
+    Shape: workbuddy_<upstream>_base<official-deb-version>_unofficial_<time>_<commit>_<arch>.
     `base_version` is the donor official Linux deb package version, so every
-    artifact records which official release it was repacked from; the repack
-    revision sits next to it and the packaging commit follows, so an artifact
-    can be traced back to the exact scripts that built it.
+    artifact records which official release it was repacked from. <time> is
+    the commit timestamp (YYYYMMDD.HHMM) and <commit> the six-character hash,
+    so an artifact identifies both its scripts and when they were written
+    without anybody having to remember a revision counter.
     """
     return (f"workbuddy_{version}_base{base_version}"
-            f"_unofficial_repack{PACKAGING_REVISION}_{commit}_{arch}")
+            f"_unofficial_{stamp}_{commit}_{arch}")
 
 
 def safe_path(root, relative):
@@ -548,7 +554,11 @@ def build(args):
         "Electron: see LICENSE and LICENSES.chromium.html in this directory.\n"
         "Other third-party notices are retained alongside their packages and runtimes.\n"
         "Sources and platform helper provenance: port-manifest.json.\n")
-    manifest = dict(version=version, packagingRevision=PACKAGING_REVISION, packagingCommit=commit,
+    commit, stamp, dirty = source_identity()
+    if dirty:
+        print("Warning: packaging tree has uncommitted changes; the commit in "
+              "the artifact name does not fully describe it", flush=True)
+    manifest = dict(version=version, packagingStamp=stamp, packagingCommit=commit,
                     source=mac, linuxHelpers=linux,
                     electron=electron, tencentElectron=runtime_version, electronABI=abi, runtimes=runtime_versions,
                     runtimePackaged=False, bundledRuntimeDefault="disabled",
@@ -583,12 +593,8 @@ def build(args):
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     outputs = []
-    package_version = f"{version}-{PACKAGING_REVISION}"
-    commit, dirty = source_commit()
-    if dirty:
-        print("Warning: packaging tree has uncommitted changes; the commit in "
-              "the artifact name does not fully describe it", flush=True)
-    stem = output_stem(version, linux["packageVersion"], arch, commit)
+    package_version = f"{version}-{stamp}"
+    stem = output_stem(version, linux["packageVersion"], arch, stamp, commit)
     if args.format in ("all", "portable"):
         output = dist / f"{stem}.tar.gz"
         run("tar", "-czf", output, "-C", work, "WorkBuddy")
@@ -644,7 +650,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.metadata:
         data = metadata("workbuddy-darwin-x64")
-        data["packagingRevision"] = PACKAGING_REVISION
+        data["packagingStamp"] = source_identity()[1]
         print(json.dumps(data, indent=2))
     else:
         build(args)

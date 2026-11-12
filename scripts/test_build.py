@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from build import (OFFICIAL_DEPENDS, PACKAGING_REVISION, control_text, electron_version, extract_asar,
+from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
                    output_stem,
                    pack_unpacked_asar, patch_bundled_runtime_default, patch_desktop, patch_linux,
                    patch_postrm, patch_postinst,
@@ -231,18 +231,19 @@ Categories=Development;
         self.assertEqual(lines, [f"{hashlib.md5(b'payload').hexdigest()}  opt/WorkBuddy/data.bin"])
 
     def test_output_stem_marks_unofficial_repack_with_the_deb_base(self):
-        stem = output_stem("5.9.3.42398134-d4692421", "5.6.2.40046327-c7b525f3", "amd64", "a1b2c3")
+        stem = output_stem("5.9.3.42398134-d4692421", "5.6.2.40046327-c7b525f3", "amd64",
+                           "20261112.1126", "a1b2c3")
         self.assertEqual(
             stem,
             "workbuddy_5.9.3.42398134-d4692421"
-            f"_base5.6.2.40046327-c7b525f3_unofficial_repack{PACKAGING_REVISION}_a1b2c3_amd64")
+            "_base5.6.2.40046327-c7b525f3_unofficial_20261112.1126_a1b2c3_amd64")
         # Keep the donor official deb version visible and avoid the redundant
         # "deb" token the official filenames carry next to the extension.
         self.assertIn("_base5.6.2.40046327-c7b525f3_", stem)
         self.assertIn("_unofficial_", stem)
-        self.assertIn(f"_repack{PACKAGING_REVISION}_", stem)
-        # The packaging commit makes every artifact traceable to its scripts.
-        self.assertIn("_a1b2c3_amd64", stem)
+        # Commit time first, then the packaging commit, so an artifact is
+        # traceable to its scripts without a hand-maintained revision.
+        self.assertIn("_20261112.1126_a1b2c3_amd64", stem)
         self.assertNotIn("deb", stem)
 
     def test_control_aligns_with_the_official_package(self):
