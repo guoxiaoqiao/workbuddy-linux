@@ -40,7 +40,7 @@
 
 - **开发、测试与验证环境为 Ubuntu 26.04**；其他发行版与版本未作考虑、未作验证。涉及依赖名（如 `libasound2t64`）、dpkg/debhelper 行为的改动需在 Ubuntu 26.04 上实测；不要为其他环境引入未经验证的兼容分支。
 
-- 版本号由 git 身份自动生成，**没有手工修订号**：`package_version` 与产物名都用「提交时间戳（`YYYYMMDD.HHMM`，取提交日期而非构建时间）+ 六位提交号」，同一提交重复构建得到完全相同的版本串，不同提交必然不同。发布一次即产生一个新版本，提交即版本。
+- 版本号由 git 身份自动生成，**没有手工修订号**：Debian `Version` 为 `<上游版本>-<提交时间戳>`（`YYYYMMDD.HHMM`，取提交日期而非构建时间），**只放时间戳不放提交号或底座版本**——dpkg 依赖它做版本比较，时间戳保证单调递增，而提交号（`72e987` 式十六进制串）与底座版本（`5.6.2` 式较小数字）会引入与构建顺序无关的比较项，破坏升级判定。完整的溯源信息在**产物文件名**（含六位提交号与 `base<底座版本>`）与 `port-manifest.json`（`packagingCommit` / `packagingStamp` / `linuxHelpers.packageVersion`）中。同一提交重复构建版本串相同，不同提交必然不同。发布一次即产生一个新版本，提交即版本。
 - **产物命名由 `output_stem()` 统一生成**：`workbuddy_<上游版本>_base<官方deb版本>_unofficial_<时间戳>_<提交号>_<架构>.deb`。`base<官方deb版本>` 取捐献者官方 Linux deb 的完整 packageVersion（可溯源到底座），`unofficial` 标识非官方，`<时间戳>` 为提交时间 `YYYYMMDD.HHMM`、`<提交号>` 为 `git rev-parse --short=6 HEAD`（二者同时写入 manifest 的 `packagingStamp` / `packagingCommit`），可据此定位到具体构建脚本；工作区有未提交改动时构建会告警。Debian `Version` 亦为 `<上游版本>-<时间戳>`，因此版本比较随提交时间单调递增。文件名里**不放** `deb` 字样（扩展名已表达）和 Electron 版本。改命名逻辑须同步 `test_build.py` 的命名测试。
 - 改动以下任何文件必须同步运行 `npm test` 并保持全绿：`scripts/build.py`、`scripts/test_build.py`、`scripts/*.sh`、`scripts/*.mjs`、`scripts/*.cjs`。
 - **CI 只测试、定时只构建、发布只手动**：`push` / `pull_request` 仅跑 `npm test` 与脚本语法检查；每日 `schedule` 会真实构建并上传 artifact 作为上游回归检查，但 `release` job 有 `github.event_name == 'workflow_dispatch'` 守卫，**不会**自动创建 tag 或 release——tag 只对应人工发布的版本，避免定时构建刷出无关版本标记。
