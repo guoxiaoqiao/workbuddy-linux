@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from build import (OFFICIAL_DEPENDS, control_text, electron_version, extract_asar,
+from build import (OFFICIAL_DEPENDS, control_text, debian_version, electron_version, extract_asar,
                    output_stem,
                    pack_unpacked_asar, patch_bundled_runtime_default, patch_cli_invoke_log_noise,
                    patch_desktop, patch_linux,
@@ -264,6 +264,24 @@ Categories=Development;
         # traceable to its scripts without a hand-maintained revision.
         self.assertIn("_20261112.1126_a1b2c3_amd64", stem)
         self.assertNotIn("deb", stem)
+
+    def test_debian_version_exposes_base_and_commit_after_the_timestamp(self):
+        version = debian_version("5.11.3.43806934-ecace0f7", "5.6.2.40046327-c7b525f3",
+                                 "20261112.2028", "72e987")
+        self.assertEqual(
+            version,
+            "5.11.3.43806934-ecace0f7-20261112.2028.72e987.base5.6.2.40046327.c7b525f3")
+        # The timestamp stays first in the Debian revision so dpkg compares
+        # build order before the hexadecimal commit or the donor base numbers.
+        self.assertTrue(version.startswith("5.11.3.43806934-ecace0f7-20261112.2028."))
+        self.assertNotIn("-", version.split("20261112.2028.", 1)[1])
+
+    def test_changed_commit_keeps_the_debian_version_monotonic(self):
+        first = debian_version("5.11.3.43806934-ecace0f7", "5.6.2.40046327-c7b525f3",
+                               "20261112.2028", "72e987")
+        later = debian_version("5.11.3.43806934-ecace0f7", "5.6.2.40046327-c7b525f3",
+                               "20261118.0900", "a1b2c3")
+        self.assertEqual(sorted([later, first]), [first, later])
 
     def test_control_aligns_with_the_official_package(self):
         text = control_text("amd64", "5.9.3-3", 1000)

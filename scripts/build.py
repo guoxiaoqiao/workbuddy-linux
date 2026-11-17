@@ -93,6 +93,22 @@ def source_identity():
     return commit, stamp, bool(dirty)
 
 
+def debian_version(version, base_version, stamp, commit):
+    """Debian Version with the full provenance visible in `apt info`.
+
+    Shape: <upstream>-<time>.<commit>.base<official-deb-version>.
+    The commit timestamp stays first in the Debian revision so dpkg compares
+    build order before the hexadecimal commit or the (numerically smaller)
+    donor base version. Dots are used inside the revision and the donor's
+    dash is flattened, so the only dash after the upstream version is the
+    revision separator; no extra comparison segment is introduced.
+    """
+    if not re.fullmatch(r"[0-9a-f]{6}", commit):
+        raise ValueError(f"Invalid packaging commit for Debian version: {commit!r}")
+    flattened_base = base_version.replace("-", ".")
+    return f"{version}-{stamp}.{commit}.base{flattened_base}"
+
+
 def output_stem(version, base_version, arch, stamp, commit):
     """File stem that keeps the artifact visibly unofficial and traceable.
 
@@ -612,7 +628,7 @@ def build(args):
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     outputs = []
-    package_version = f"{version}-{stamp}"
+    package_version = debian_version(version, linux["packageVersion"], stamp, commit)
     stem = output_stem(version, linux["packageVersion"], arch, stamp, commit)
     if args.format in ("all", "portable"):
         output = dist / f"{stem}.tar.gz"
