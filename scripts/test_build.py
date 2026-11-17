@@ -265,16 +265,16 @@ Categories=Development;
         self.assertIn("_20261112.1126_a1b2c3_amd64", stem)
         self.assertNotIn("deb", stem)
 
-    def test_debian_version_exposes_base_and_commit_after_the_timestamp(self):
+    def test_debian_version_follows_the_artifact_field_order(self):
         version = debian_version("5.11.3.43806934-ecace0f7", "5.6.2.40046327-c7b525f3",
                                  "20261112.2028", "72e987")
         self.assertEqual(
             version,
-            "5.11.3.43806934-ecace0f7-20261112.2028.72e987.base5.6.2.40046327.c7b525f3")
-        # The timestamp stays first in the Debian revision so dpkg compares
-        # build order before the hexadecimal commit or the donor base numbers.
-        self.assertTrue(version.startswith("5.11.3.43806934-ecace0f7-20261112.2028."))
-        self.assertNotIn("-", version.split("20261112.2028.", 1)[1])
+            "5.11.3.43806934-ecace0f7.base5.6.2.40046327.c7b525f3-20261112.2028.72e987")
+        # Same field order as the artifact stem: upstream, base, time, commit.
+        self.assertTrue(version.startswith("5.11.3.43806934-ecace0f7.base5.6.2."))
+        self.assertNotIn("-", version.split("base", 1)[1].split("-", 1)[0])
+        self.assertTrue(version.endswith("-20261112.2028.72e987"))
 
     def test_changed_commit_keeps_the_debian_version_monotonic(self):
         first = debian_version("5.11.3.43806934-ecace0f7", "5.6.2.40046327-c7b525f3",

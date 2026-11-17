@@ -94,19 +94,21 @@ def source_identity():
 
 
 def debian_version(version, base_version, stamp, commit):
-    """Debian Version with the full provenance visible in `apt info`.
+    """Debian Version with full provenance, ordered like the artifact stem.
 
-    Shape: <upstream>-<time>.<commit>.base<official-deb-version>.
-    The commit timestamp stays first in the Debian revision so dpkg compares
-    build order before the hexadecimal commit or the (numerically smaller)
-    donor base version. Dots are used inside the revision and the donor's
-    dash is flattened, so the only dash after the upstream version is the
-    revision separator; no extra comparison segment is introduced.
+    Shape: <upstream>.base<official-deb-version>-<time>.<commit>.
+    The base version is flattened (dashes to dots) and placed in the upstream
+    part, matching the stem's `<upstream>_base<...>_unofficial_<time>_<commit>`
+    field order. dpkg compares upstream before the revision, and the timestamp
+    stays first in the revision so build order wins over the hexadecimal
+    commit on a tie. Verified with dpkg --compare-versions: upgrading from the
+    old <upstream>-<time> form, to later commits, and to a newer base all
+    compare as upgrades.
     """
     if not re.fullmatch(r"[0-9a-f]{6}", commit):
         raise ValueError(f"Invalid packaging commit for Debian version: {commit!r}")
     flattened_base = base_version.replace("-", ".")
-    return f"{version}-{stamp}.{commit}.base{flattened_base}"
+    return f"{version}.base{flattened_base}-{stamp}.{commit}"
 
 
 def output_stem(version, base_version, arch, stamp, commit):
